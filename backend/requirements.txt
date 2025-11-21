@@ -1,0 +1,29 @@
+# Core Web Framework
+flask
+flask-cors
+
+# Database Connector
+mysql-connector-python
+
+# ML / Data Processing
+scikit-learn
+joblib
+numpy
+pandas
+
+# Visualization
+matplotlib
+seaborn
+
+# Computer Vision
+opencv-python
+
+# PDF/Report Generation
+reportlab
+
+# Utilities
+requests
+dotenv
+flask-bcrypt
+cython
+setuptools
