@@ -9,6 +9,9 @@ from routes.auth_routes import auth_bp
 from routes.locations_routes import locations_bp
 from routes.master_routes import master_bp  
 from routes.farms_routes import farms_bp 
+from routes.contracts_routes import contracts_bp
+from routes.commodities_routes import commodities_bp
+from routes.trader_routes import trader_bp
 
 app = Flask(__name__)
 
@@ -19,6 +22,9 @@ app.register_blueprint(auth_bp)
 app.register_blueprint(locations_bp)
 app.register_blueprint(master_bp)    
 app.register_blueprint(farms_bp)
+app.register_blueprint(contracts_bp)
+app.register_blueprint(commodities_bp)
+app.register_blueprint(trader_bp)
 
 @app.route("/")
 def hello():

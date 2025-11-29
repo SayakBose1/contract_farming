@@ -1,4 +1,3 @@
-
 from flask import Blueprint, request, jsonify, current_app
 from functools import wraps
 import os
@@ -339,3 +338,14 @@ def update_profile(current_user):
     except Exception as e:
         current_app.logger.exception("Profile update error")
         return jsonify({"message": f"Profile update failed: {str(e)}"}), 500
+
+# ------------------------------
+# LOGOUT (Simple)
+# ------------------------------
+@auth_bp.route('/logout', methods=['POST'])
+@token_required
+def logout(current_user):
+    """
+    JWT logout is client-side, but we return 200 to avoid frontend errors.
+    """
+    return jsonify({"message": "Logged out successfully"}), 200

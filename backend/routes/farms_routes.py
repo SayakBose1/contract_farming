@@ -2,9 +2,13 @@ from flask import Blueprint, request, jsonify
 import pymysql
 import os
 import json
+import jwt
 from datetime import datetime
 
 farms_bp = Blueprint("farms", __name__, url_prefix="/farms")
+
+# Use the same secret as auth_routes.py
+SECRET_KEY = os.environ.get('SECRET_KEY', 'your-secret-key-change-this')
 
 
 def get_db():
@@ -18,9 +22,47 @@ def get_db():
     )
 
 
-# TEMP — until JWT
+# --------------------------
+# REAL CURRENT USER (from JWT)
+# --------------------------
 def get_current_user_id():
-    return 1
+    """
+    Extract user_id from JWT token (same logic as auth.token_required)
+    """
+    auth_header = request.headers.get("Authorization", "")
+
+    if not auth_header:
+        # No token sent
+        return None
+
+    token = auth_header
+    if token.startswith("Bearer "):
+        token = token[7:]
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+        mobile = payload.get("mobile_number")
+        if not mobile:
+            return None
+
+        conn = get_db()
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT user_id 
+                FROM m_user_login 
+                WHERE mobile_number=%s 
+                LIMIT 1
+            """, (mobile,))
+            user = cur.fetchone()
+        conn.close()
+
+        if not user:
+            return None
+
+        return user["user_id"]
+
+    except Exception:
+        return None
 
 
 # --------------------------
@@ -52,6 +94,9 @@ def safe_json(value):
 def list_farms():
     try:
         user_id = get_current_user_id()
+        if not user_id:
+            return jsonify({"message": "Unauthorized"}), 401
+
         conn = get_db()
         with conn.cursor() as cur:
             sql = """
@@ -110,6 +155,7 @@ def list_farms():
 @farms_bp.route("/<int:farm_id>", methods=["GET"])
 def get_farm(farm_id):
     try:
+        # (Optional) you could also check owner via get_current_user_id() here
         conn = get_db()
         with conn.cursor() as cur:
             sql = """
@@ -194,6 +240,9 @@ def create_farm():
 
     try:
         user_id = get_current_user_id()
+        if not user_id:
+            return jsonify({"message": "Unauthorized"}), 401
+
         now = datetime.now()
 
         # Extract sub-groups
@@ -316,9 +365,17 @@ def create_farm():
 @farms_bp.route("/<int:farm_id>", methods=["DELETE"])
 def delete_farm(farm_id):
     try:
+        user_id = get_current_user_id()
+        if not user_id:
+            return jsonify({"message": "Unauthorized"}), 401
+
         conn = get_db()
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM m_farm WHERE farm_id = %s", (farm_id,))
+            # Optional: ensure the farm belongs to current user
+            cur.execute(
+                "DELETE FROM m_farm WHERE farm_id = %s AND user_id = %s",
+                (farm_id, user_id)
+            )
         conn.close()
         return jsonify({"message": "Farm deleted successfully"}), 200
 

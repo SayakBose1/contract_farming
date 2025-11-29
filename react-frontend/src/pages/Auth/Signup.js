@@ -97,9 +97,6 @@ const Signup = () => {
 
         {/* Header */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-green-500 to-emerald-600 rounded-2xl shadow-xl mb-4">
-            <FaTractor className="text-white text-3xl" />
-          </div>
           <h1 className="text-4xl font-bold text-gray-800">Join Us Today</h1>
           <p className="text-gray-600">Create your account to get started</p>
         </div>

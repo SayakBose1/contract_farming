@@ -97,9 +97,6 @@ const Login = () => {
 
         {/* Header */}
         <div className="text-center mb-8 animate-fade-in">
-          <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-green-500 to-emerald-600 rounded-2xl shadow-xl mb-4 transform hover:scale-110 transition">
-            <FaTractor className="text-white text-3xl" />
-          </div>
           <h1 className="text-4xl font-bold text-gray-800 mb-2">Welcome Back</h1>
           <p className="text-gray-600">Sign in to continue</p>
         </div>
@@ -208,10 +205,6 @@ const Login = () => {
             <a href="/signup" className="text-green-600 ml-1 hover:underline">Create one</a>
           </p>
         </div>
-
-        <p className="text-center text-sm text-gray-500 mt-6">
-          Secure login powered by end-to-end encryption
-        </p>
       </div>
 
       {/* Animations */}

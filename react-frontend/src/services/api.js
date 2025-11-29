@@ -119,8 +119,9 @@ export const locationsAPI = {
 export const contractsAPI = {
   getContracts: (params) => api.get("/contracts", { params }),
   getAvailableContracts: (params) =>
-    api.get("/contracts/available", { params }),
+    api.get("/trader/contracts/available", { params }),
   getContract: (id) => api.get(`/contracts/${id}`),
+  getFormData: () => api.get("/contracts/form-data"),
   createContract: (data) => api.post("/contracts", data),
   updateContract: (id, data) => api.put(`/contracts/${id}`, data),
   acceptContract: (id) => api.post(`/contracts/${id}/accept`),
@@ -128,9 +129,9 @@ export const contractsAPI = {
   signContract: (id, data) => api.post(`/contracts/${id}/sign`, data),
   disputeContract: (id, data) => api.post(`/contracts/${id}/dispute`, data),
   cancelContract: (id) => api.delete(`/contracts/${id}`),
-  showInterest: (id) => api.post(`/contracts/${id}/interest`),
+  showInterest: (id) => api.post(`/trader/contracts/${id}/interest`),
   acceptTrader: (id, traderId) =>
-    api.post(`/contracts/${id}/accept-trader`, { traderId }),
+    api.post(`/trader/contracts/${id}/accept-trader/${traderId}`),
 };
 
 // ---------------------------------------------------------
