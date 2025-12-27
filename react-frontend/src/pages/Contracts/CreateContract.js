@@ -24,6 +24,7 @@ const CreateContract = () => {
   const [farms, setFarms] = useState([]);
   const [commodities, setCommodities] = useState([]);
   const [varieties, setVarieties] = useState([]);
+  const [cropImages, setCropImages] = useState([]);
 
   const [formData, setFormData] = useState({
     farm: farmId || "",
@@ -150,7 +151,6 @@ const CreateContract = () => {
   const handleNestedInputChange = (section, nestedSection, field, value) => {
     setFormData((prev) => {
       if (!nestedSection) {
-        // flat update inside cropDetails, farmingDetails, etc.
         return {
           ...prev,
           [section]: {
@@ -160,7 +160,6 @@ const CreateContract = () => {
         };
       }
 
-      // nested update
       return {
         ...prev,
         [section]: {
@@ -176,20 +175,51 @@ const CreateContract = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
     try {
       setLoading(true);
       setError(null);
 
-      await contractsAPI.createContract(formData);
+      const res = await contractsAPI.createContract(formData);
+      console.log("Contract created response:", res.data);
+
+      const contractId = res.data.contract_id;
+
+      if (!contractId) {
+        throw new Error("Contract ID not returned from backend");
+      }
+
+      if (cropImages.length > 0) {
+        const fd = new FormData();
+        cropImages.forEach((img) => fd.append("images", img));
+        fd.append("upload_stage", "creation");
+
+        await contractsAPI.uploadContractImages(contractId, fd);
+      }
 
       navigate("/contracts", {
         state: { message: "Contract created successfully!" },
       });
     } catch (err) {
-      setError(err.response?.data?.message || "Failed to create contract");
+      console.error(err);
+      setError(err.message || "Failed to create contract");
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleCropImageSelect = (e) => {
+    const files = Array.from(e.target.files);
+
+    const validImages = files.filter(
+      (file) => file.type.startsWith("image/") && file.size <= 5 * 1024 * 1024 // 5MB
+    );
+
+    setCropImages((prev) => [...prev, ...validImages]);
+  };
+
+  const removeCropImage = (index) => {
+    setCropImages((prev) => prev.filter((_, i) => i !== index));
   };
 
   const steps = [
@@ -481,6 +511,51 @@ const CreateContract = () => {
                       <option value="bags">Bags</option>
                     </select>
                   </div>
+                </div>
+
+                {/* Crop Images Upload */}
+                <div className="border-t pt-6">
+                  <h3 className="text-lg font-semibold text-gray-800 mb-2">
+                    Crop Images
+                  </h3>
+
+                  <p className="text-sm text-gray-500 mb-3">
+                    Upload images related to the crop.
+                  </p>
+
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handleCropImageSelect}
+                    className="block w-full text-sm text-gray-600"
+                  />
+
+                  {/* Image Preview */}
+                  {cropImages.length > 0 && (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+                      {cropImages.map((img, index) => (
+                        <div
+                          key={index}
+                          className="relative border rounded-lg overflow-hidden"
+                        >
+                          <img
+                            src={URL.createObjectURL(img)}
+                            alt="Crop preview"
+                            className="h-28 w-full object-cover"
+                          />
+
+                          <button
+                            type="button"
+                            onClick={() => removeCropImage(index)}
+                            className="absolute top-1 right-1 bg-red-600 text-white text-xs px-2 py-1 rounded"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

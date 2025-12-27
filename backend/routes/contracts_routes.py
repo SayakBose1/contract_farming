@@ -2,18 +2,19 @@ import os
 import json
 import jwt
 import datetime
+import hashlib
+from PIL import Image
+from io import BytesIO
 from flask import Blueprint, request, jsonify
 from db import get_db
+from flask import send_from_directory
+from werkzeug.utils import secure_filename
+import uuid
 
 contracts_bp = Blueprint("contracts", __name__)
-
-# Same secret as in auth_routes.py
-SECRET_KEY = os.environ.get('SECRET_KEY', 'your-secret-key-change-this')
+SECRET_KEY = os.environ.get('SECRET_KEY')
 
 
-# ----------------------------------------------------------
-# Helper: Get current user_id from JWT token
-# ----------------------------------------------------------
 def get_current_user_id():
     """
     Reads Authorization: Bearer <token>, decodes JWT, finds user_id from m_user_login.
@@ -72,9 +73,6 @@ def to_iso(dt):
         return None
 
 
-# ----------------------------------------------------------
-# Helper: Format contract to frontend
-# ----------------------------------------------------------
 def format_contract(row):
     return {
         "id": row["id"],
@@ -151,9 +149,6 @@ def format_contract(row):
     }
 
 
-# ----------------------------------------------------------
-# Create Contract
-# ----------------------------------------------------------
 @contracts_bp.route("/contracts", methods=["POST"])
 def create_contract():
     user_id = get_current_user_id()
@@ -166,7 +161,6 @@ def create_contract():
     try:
         cursor = db.cursor()
 
-        # Default quality if missing
         quality = data["cropDetails"].get("quality") or "standard"
 
         contract_uid = f"C{int(datetime.datetime.now().timestamp())}{user_id}"
@@ -272,16 +266,18 @@ def create_contract():
         )
 
         db.commit()
-        return jsonify({"message": "Contract created successfully!"}), 201
+        return jsonify({
+    "message": "Contract created successfully!",
+    "contract_id": contract_uid
+}), 201
+
 
     except Exception as e:
         print("CREATE CONTRACT ERROR:", e)
         return jsonify({"message": "Failed to create contract"}), 500
 
 
-# ----------------------------------------------------------
-# Get All Contracts (for logged-in farmer)
-# ----------------------------------------------------------
+
 @contracts_bp.route("/contracts", methods=["GET"])
 def get_contracts():
     user_id = get_current_user_id()
@@ -317,14 +313,39 @@ def get_contracts():
     return jsonify({"contracts": [format_contract(r) for r in rows]})
 
 
-# ----------------------------------------------------------
-# Get Single Contract
-# ----------------------------------------------------------
+
+# @contracts_bp.route("/contracts/<string:contract_id>", methods=["GET"])
+# def get_contract(contract_id):
+#     db = get_db()
+#     cursor = db.cursor()
+
+#     cursor.execute(
+#         """
+#         SELECT c.*, 
+#                f.farm_name, f.farm_size_area, f.farm_size_unit,
+#                com.commodity_name,
+#                v.variety_name
+#         FROM contracts c
+#         JOIN m_farm f ON f.farm_id = c.farm_id
+#         JOIN m_commodity com ON com.commodity_id = c.commodity_id
+#         JOIN m_commodity_variety v ON v.variety_id = c.variety_id
+#         WHERE c.contract_id = %s
+#     """,
+#         (contract_id,),
+#     )
+
+#     row = cursor.fetchone()
+
+#     if not row:
+#         return jsonify({"message": "Contract not found"}), 404
+
+#     return jsonify({"contract": format_contract(row)})
 @contracts_bp.route("/contracts/<string:contract_id>", methods=["GET"])
 def get_contract(contract_id):
     db = get_db()
     cursor = db.cursor()
 
+    # 1. Fetch contract
     cursor.execute(
         """
         SELECT c.*, 
@@ -336,8 +357,8 @@ def get_contract(contract_id):
         JOIN m_commodity com ON com.commodity_id = c.commodity_id
         JOIN m_commodity_variety v ON v.variety_id = c.variety_id
         WHERE c.contract_id = %s
-    """,
-        (contract_id,),
+        """,
+        (contract_id,)
     )
 
     row = cursor.fetchone()
@@ -345,12 +366,49 @@ def get_contract(contract_id):
     if not row:
         return jsonify({"message": "Contract not found"}), 404
 
-    return jsonify({"contract": format_contract(row)})
+    # 2. Parse negotiations
+    negotiations = json.loads(row["negotiations"] or "[]")
+
+    # 3. Collect trader IDs who showed interest
+    trader_ids = [
+        n["trader_id"]
+        for n in negotiations
+        if n.get("type") == "interest"
+    ]
+
+    trader_map = {}
+
+    # 4. Fetch trader name & phone
+    if trader_ids:
+        cursor.execute(
+            """
+            SELECT user_id, full_name, mobile_number
+            FROM m_user_login
+            WHERE user_id IN %s
+            """,
+            (tuple(trader_ids),)
+        )
+
+        for t in cursor.fetchall():
+            trader_map[t["user_id"]] = {
+                "trader_name": t["full_name"],
+                "trader_mobile": t["mobile_number"]
+            }
+
+    # 5. Enrich negotiations with trader info
+    for n in negotiations:
+        tid = n.get("trader_id")
+        if tid in trader_map:
+            n.update(trader_map[tid])
+
+    # 6. Send enriched contract
+    contract_data = format_contract(row)
+    contract_data["negotiations"] = negotiations
+
+    return jsonify({"contract": contract_data})
 
 
-# ----------------------------------------------------------
-# Cancel Contract
-# ----------------------------------------------------------
+
 @contracts_bp.route("/contracts/<string:contract_id>/cancel", methods=["POST"])
 def cancel_contract(contract_id):
     user_id = get_current_user_id()
@@ -360,7 +418,6 @@ def cancel_contract(contract_id):
     db = get_db()
     cursor = db.cursor()
 
-    # Optional: ensure only owner can cancel
     cursor.execute(
         """
         UPDATE contracts 
@@ -374,9 +431,7 @@ def cancel_contract(contract_id):
     return jsonify({"message": "Contract cancelled"})
 
 
-# ----------------------------------------------------------
-# Trader Interest (this is legacy, you mainly use trader_routes now)
-# ----------------------------------------------------------
+
 @contracts_bp.route("/contracts/<string:contract_id>/interest", methods=["POST"])
 def show_interest(contract_id):
     user_id = get_current_user_id()
@@ -418,9 +473,7 @@ def show_interest(contract_id):
     return jsonify({"message": "Interest recorded"})
 
 
-# ----------------------------------------------------------
-# Farmer Accepts Trader
-# ----------------------------------------------------------
+
 @contracts_bp.route(
     "/contracts/<string:contract_id>/accept/<int:trader_id>", methods=["POST"]
 )
@@ -445,7 +498,6 @@ def accept_trader(contract_id, trader_id):
     if not row:
         return jsonify({"message": "Contract not found"}), 404
 
-    # Optional: ensure only owner farmer can accept
     if row["user_id"] != user_id:
         return jsonify({"message": "Not allowed"}), 403
 
@@ -470,9 +522,7 @@ def accept_trader(contract_id, trader_id):
     return jsonify({"message": "Trader accepted"})
 
 
-# ----------------------------------------------------------
-# Contract Form Data
-# ----------------------------------------------------------
+
 @contracts_bp.route("/contracts/form-data", methods=["GET"])
 def get_form_data():
     user_id = get_current_user_id()
@@ -482,7 +532,6 @@ def get_form_data():
     db = get_db()
     cursor = db.cursor()
 
-    # Farms of this logged-in farmer
     cursor.execute(
         """
         SELECT farm_id, farm_name 
@@ -520,3 +569,258 @@ def get_form_data():
             "units": units,
         }
     )
+
+
+
+@contracts_bp.route("/contracts/<string:contract_id>/images", methods=["POST"])
+def upload_contract_images(contract_id):
+    user_id = get_current_user_id()
+    if not user_id:
+        return jsonify({"message": "Unauthorized"}), 401
+
+    files = request.files.getlist("images")
+    upload_stage = request.form.get("upload_stage", "creation")
+
+    if not files:
+        return jsonify({"message": "No images provided"}), 400
+
+    db = get_db()
+    cursor = db.cursor()
+
+    cursor.execute(
+        "SELECT contract_status FROM contracts WHERE contract_id=%s",
+        (contract_id,)
+    )
+    if not cursor.fetchone():
+        return jsonify({"message": "Contract not found"}), 404
+
+    cursor.execute(
+        "SELECT user_type FROM m_user_login WHERE user_id=%s",
+        (user_id,)
+    )
+    row = cursor.fetchone()
+    uploader_role = "trader" if row and row["user_type"].lower().startswith("t") else "farmer"
+
+    UPLOAD_DIR = os.getenv("CONTRACT_IMAGE_PATH", "uploads/contracts")
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+    inserted = 0
+
+    for file in files:
+        content = file.read()
+
+        if len(content) > 5 * 1024 * 1024:
+            continue
+
+        try:
+            img = Image.open(BytesIO(content))
+            img.verify()
+            img = Image.open(BytesIO(content))
+            width, height = img.size
+        except Exception:
+            continue
+
+        filename = secure_filename(file.filename)
+        unique_name = f"{contract_id}_{uuid.uuid4().hex}_{filename}"
+        file_path = os.path.join(UPLOAD_DIR, unique_name)
+
+        with open(file_path, "wb") as f:
+            f.write(content)
+
+        file_size_kb = len(content) // 1024
+        checksum = hashlib.sha256(content).hexdigest()
+
+        cursor.execute(
+            """
+            INSERT INTO contract_images (
+                contract_id,
+                uploaded_by,
+                uploader_role,
+                upload_stage,
+                original_filename,
+                file_type,
+                file_size_kb,
+                image_width,
+                image_height,
+                checksum_sha256,
+                is_verified
+            )
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1)
+            """,
+            (
+                contract_id,
+                user_id,
+                uploader_role,
+                upload_stage,
+                unique_name,
+                file.content_type,
+                file_size_kb,
+                width,
+                height,
+                checksum
+            )
+        )
+
+        inserted += 1
+
+    db.commit()
+
+    return jsonify({
+        "message": "Images uploaded successfully",
+        "count": inserted
+    })
+
+
+
+@contracts_bp.route("/contracts/images/<path:filename>")
+def serve_contract_image(filename):
+    image_dir = os.getenv("CONTRACT_IMAGE_PATH", "uploads/contracts")
+    return send_from_directory(image_dir, filename)
+
+
+
+@contracts_bp.route("/contracts/<string:contract_id>/images", methods=["GET"])
+def get_contract_images(contract_id):
+    db = get_db()
+    cursor = db.cursor()
+
+    cursor.execute(
+        """
+        SELECT image_id,
+               original_filename,
+               uploader_role,
+               upload_stage,
+               created_at
+        FROM contract_images
+        WHERE contract_id=%s
+        ORDER BY created_at DESC
+        """,
+        (contract_id,)
+    )
+
+    images = cursor.fetchall()
+    base_url = os.getenv("BASE_URL", "http://localhost:5005")
+
+    for img in images:
+        img["image_url"] = f"{base_url}/contracts/images/{img['original_filename']}"
+
+    return jsonify({"images": images})
+
+
+
+@contracts_bp.route("/contracts/<string:contract_id>/image-request", methods=["POST"])
+def create_image_request(contract_id):
+    user_id = get_current_user_id()
+    if not user_id:
+        return jsonify({"message": "Unauthorized"}), 401
+
+    db = get_db()
+    cursor = db.cursor()
+    data = request.json or {}
+
+    cursor.execute(
+        "SELECT contract_status, trader_user_id FROM contracts WHERE contract_id=%s",
+        (contract_id,)
+    )
+    contract = cursor.fetchone()
+
+    if not contract:
+        return jsonify({"message": "Contract not found"}), 404
+
+    if contract["contract_status"] != "negotiating":
+        return jsonify({"message": "Contract not in negotiation"}), 400
+
+    if contract["trader_user_id"] != user_id:
+        return jsonify({"message": "Only accepted trader can request images"}), 403
+
+    cursor.execute(
+        """
+        SELECT request_id FROM contract_image_requests
+        WHERE contract_id=%s AND status='pending'
+        """,
+        (contract_id,)
+    )
+    if cursor.fetchone():
+        return jsonify({"message": "Request already pending"}), 400
+
+    cursor.execute(
+        """
+        INSERT INTO contract_image_requests (contract_id, requested_by, message)
+        VALUES (%s, %s, %s)
+        """,
+        (contract_id, user_id, data.get("message"))
+    )
+
+    db.commit()
+    return jsonify({"message": "Image request sent"}), 201
+
+
+
+@contracts_bp.route("/contracts/<string:contract_id>/image-request", methods=["GET"])
+def get_image_request(contract_id):
+    user_id = get_current_user_id()
+    if not user_id:
+        return jsonify({"message": "Unauthorized"}), 401
+
+    db = get_db()
+    cursor = db.cursor()
+
+    cursor.execute(
+        """
+        SELECT request_id, message, status, created_at
+        FROM contract_image_requests
+        WHERE contract_id=%s
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        (contract_id,)
+    )
+
+    req = cursor.fetchone()
+
+    if not req:
+        return jsonify({"request": None})
+
+    return jsonify({
+        "request": {
+            "request_id": req["request_id"],
+            "message": req["message"],
+            "status": req["status"],
+            "created_at": req["created_at"]
+        }
+    })
+
+
+
+@contracts_bp.route(
+    "/contracts/<string:contract_id>/image-request/fulfill",
+    methods=["POST"]
+)
+def fulfill_image_request(contract_id):
+    user_id = get_current_user_id()
+    if not user_id:
+        return jsonify({"message": "Unauthorized"}), 401
+
+    db = get_db()
+    cursor = db.cursor()
+
+    cursor.execute(
+        "SELECT user_id FROM contracts WHERE contract_id=%s",
+        (contract_id,)
+    )
+    contract = cursor.fetchone()
+
+    if not contract or contract["user_id"] != user_id:
+        return jsonify({"message": "Not allowed"}), 403
+
+    cursor.execute(
+        """
+        UPDATE contract_image_requests
+        SET status='fulfilled', fulfilled_at=NOW()
+        WHERE contract_id=%s AND status='pending'
+        """,
+        (contract_id,)
+    )
+
+    db.commit()
+    return jsonify({"message": "Image request fulfilled"})

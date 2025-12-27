@@ -13,7 +13,7 @@ import {
   FaWarehouse,
 } from "react-icons/fa";
 import { useAuth } from "../../contexts/AuthContext";
-import { farmsAPI, uploadAPI } from "../../services/api";
+import { farmsAPI, uploadAPI, commoditiesAPI } from "../../services/api";
 import axios from "axios";
 import LoadingSpinner from "../../components/Common/LoadingSpinner";
 
@@ -26,14 +26,12 @@ const CreateFarm = () => {
   const [currentStep, setCurrentStep] = useState(1);
   const [errors, setErrors] = useState({});
 
-  // Location dropdown data
   const [divisions, setDivisions] = useState([]);
   const [districts, setDistricts] = useState([]);
   const [tehsils, setTehsils] = useState([]);
   const [blocks, setBlocks] = useState([]);
   const [loadingLocations, setLoadingLocations] = useState(false);
 
-  // Form data state
   const [formData, setFormData] = useState({
     farmName: "",
     farmDivision: "",
@@ -133,9 +131,15 @@ const CreateFarm = () => {
   const seasons = ["kharif", "rabi", "zaid"];
   const cropStatuses = ["planted", "growing", "ready", "harvested"];
 
-  // Fetch divisions on component mount
+  const [commodities, setCommodities] = useState([]);
+  const [varieties, setVarieties] = useState({});
+
   useEffect(() => {
     fetchDivisions();
+  }, []);
+
+  useEffect(() => {
+    fetchCommodities();
   }, []);
 
   const fetchDivisions = async () => {
@@ -263,7 +267,6 @@ const CreateFarm = () => {
         [field]: value,
       }));
     }
-    // Clear error when user starts typing
     if (errors[`${section}.${field}`] || errors[field]) {
       setErrors((prev) => ({
         ...prev,
@@ -328,7 +331,6 @@ const CreateFarm = () => {
         [type]: [...prev[type], ...fileArray],
       }));
 
-      // Initialize descriptions for new files
       const newDescriptions = fileArray.map(() => "");
       setMediaDescriptions((prev) => ({
         ...prev,
@@ -359,6 +361,30 @@ const CreateFarm = () => {
       ...prev,
       [type]: prev[type].map((desc, i) => (i === index ? description : desc)),
     }));
+  };
+
+  const fetchCommodities = async () => {
+    try {
+      const res = await commoditiesAPI.getCommodities();
+      setCommodities(res.data.commodities || []);
+    } catch (err) {
+      console.error("Error loading commodities:", err);
+    }
+  };
+
+  const fetchVarieties = async (commodityId, cropIndex) => {
+    if (!commodityId) return;
+
+    try {
+      const res = await commoditiesAPI.getVarieties(commodityId);
+
+      setVarieties((prev) => ({
+        ...prev,
+        [cropIndex]: res.data.varieties || [],
+      }));
+    } catch (err) {
+      console.error("Error fetching varieties:", err);
+    }
   };
 
   const validateStep = (step) => {
@@ -413,7 +439,6 @@ const CreateFarm = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Only allow submission when on the final step
     if (currentStep !== steps.length) {
       console.log("Form submission blocked - not on final step");
       return;
@@ -423,11 +448,9 @@ const CreateFarm = () => {
 
     setLoading(true);
     try {
-      // Create farm first
       const farmResponse = await farmsAPI.createFarm(formData);
       const farmId = farmResponse.data.farm_id;
 
-      // Upload media files if any
       if (mediaFiles.images.length > 0 || mediaFiles.videos.length > 0) {
         const allFiles = [...mediaFiles.images, ...mediaFiles.videos];
         const allDescriptions = [
@@ -442,7 +465,6 @@ const CreateFarm = () => {
             "Media upload failed, but farm was created:",
             uploadError
           );
-          // Continue even if media upload fails
         }
       }
 
@@ -455,10 +477,8 @@ const CreateFarm = () => {
       console.error("Error creating farm:", error);
       console.error("Error response:", error.response?.data);
 
-      // Get detailed error message
       let errorMessage = "Failed to create farm";
       if (error.response?.data?.errors) {
-        // Validation errors array
         errorMessage = error.response.data.errors
           .map((err) => err.msg)
           .join(", ");
@@ -1204,23 +1224,45 @@ const CreateFarm = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {/* Crop Name */}
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">
-                        Crop Name
-                      </label>
-                      <input
-                        type="text"
-                        value={crop.cropName}
-                        onChange={(e) =>
-                          handleArrayInputChange(
-                            "currentCrops",
-                            index,
-                            "cropName",
-                            e.target.value
-                          )
-                        }
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500"
-                        placeholder="Crop name"
-                      />
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">
+                          Crop Name
+                        </label>
+
+                        <select
+                          value={crop.commodityId || ""}
+                          onChange={async (e) => {
+                            const commodityId = e.target.value;
+
+                            handleArrayInputChange(
+                              "currentCrops",
+                              index,
+                              "commodityId",
+                              commodityId
+                            );
+
+                            handleArrayInputChange(
+                              "currentCrops",
+                              index,
+                              "varietyId",
+                              ""
+                            );
+                            
+                            await fetchVarieties(commodityId, index);
+                          }}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500"
+                        >
+                          <option value="">Select Commodity</option>
+                          {commodities.map((commodity) => (
+                            <option
+                              key={commodity.commodity_id}
+                              value={commodity.commodity_id}
+                            >
+                              {commodity.commodity_name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
 
                     {/* Variety */}
@@ -1228,20 +1270,37 @@ const CreateFarm = () => {
                       <label className="block text-xs font-medium text-gray-600 mb-1">
                         Variety
                       </label>
-                      <input
-                        type="text"
-                        value={crop.variety}
+
+                      <select
+                        value={crop.varietyId || ""}
                         onChange={(e) =>
                           handleArrayInputChange(
                             "currentCrops",
                             index,
-                            "variety",
+                            "varietyId",
                             e.target.value
                           )
                         }
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500"
-                        placeholder="Variety"
-                      />
+                        disabled={!crop.commodityId}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
+                      >
+                        <option value="">Select Variety</option>
+
+                        {(varieties[index] || []).map((variety) => (
+                          <option
+                            key={variety.variety_id}
+                            value={variety.variety_id}
+                          >
+                            {variety.variety_name}
+                          </option>
+                        ))}
+                      </select>
+
+                      {!crop.commodityId && (
+                        <p className="text-xs text-gray-500 mt-1">
+                          Select a commodity first
+                        </p>
+                      )}
                     </div>
 
                     {/* Planted Area */}

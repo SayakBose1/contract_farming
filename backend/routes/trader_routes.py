@@ -10,9 +10,7 @@ trader_bp = Blueprint("trader", __name__, url_prefix="/trader")
 SECRET_KEY = os.environ.get("SECRET_KEY", "your-secret-key-change-this")
 
 
-# -------------------------------------------------------------
-# REAL USER FROM JWT (same logic as farms + auth)
-# -------------------------------------------------------------
+
 def get_current_user_id():
     auth_header = request.headers.get("Authorization", "")
 
@@ -47,11 +45,8 @@ def get_current_user_id():
         return None
 
 
-# -------------------------------------------------------------
-# Helper: Format contract for frontend
-# -------------------------------------------------------------
+
 def format_available_contract(row):
-    # Convert MySQL datetime string to ISO format for React
     def to_iso(dt):
         if not dt:
             return None
@@ -68,7 +63,6 @@ def format_available_contract(row):
         "contractStatus": row["contract_status"],
 
 
-        # FIXED DATE
         "createdAt": to_iso(row["created_at"]),
 
         "commodity": {
@@ -129,87 +123,71 @@ def format_available_contract(row):
     }
 
 
-# ----------------------------------------------------------------------
-# 1️⃣ GET ALL AVAILABLE OPEN CONTRACTS (EXCEPT TRADER’S OWN)
-# ----------------------------------------------------------------------
+
 @trader_bp.route("/contracts/available", methods=["GET"])
 def get_available_contracts():
     trader_id = get_current_user_id()
-
     if not trader_id:
         return jsonify({"message": "Unauthorized"}), 401
 
     status = request.args.get("status", "open").lower()
 
-    division = request.args.get("division")
-    district = request.args.get("district")
-    tehsil = request.args.get("tehsil")
-    block = request.args.get("block")
-
     db = get_db()
     cur = db.cursor()
 
-    query = """
+    base_query = """
         SELECT 
             c.*,
             f.farm_name, f.farm_id,
             f.farm_division, f.farm_district, f.farm_tehsil, f.farm_block,
-
             d.division_name,
             dist.district_name,
             t.tehsil_name,
             b.block_name,
-
             com.commodity_name,
             v.variety_name,
-
             u.full_name AS farmer_name
-
         FROM contracts c
         JOIN m_farm f ON f.farm_id = c.farm_id
         JOIN m_commodity com ON com.commodity_id = c.commodity_id
         JOIN m_commodity_variety v ON v.variety_id = c.variety_id
         JOIN m_user_login u ON u.user_id = c.user_id
-
         LEFT JOIN m_division d ON d.division_id = f.farm_division
         LEFT JOIN m_district dist ON dist.district_id = f.farm_district
         LEFT JOIN m_tehsil t ON t.tehsil_id = f.farm_tehsil
         LEFT JOIN m_block b ON b.block_id = f.farm_block
-
-        WHERE LOWER(c.contract_status) = %s
-          AND c.user_id != %s
+        WHERE c.user_id != %s
     """
 
-    params = [status, trader_id]
+    params = [trader_id]
 
-    # Filters
-    if division:
-        query += " AND f.farm_division=%s"
-        params.append(division)
+    # ✅ OPEN TAB → ONLY OPEN CONTRACTS
+    if status == "open":
+        base_query += " AND LOWER(c.contract_status) = 'open'"
 
-    if district:
-        query += " AND f.farm_district=%s"
-        params.append(district)
+    # ✅ NEGOTIATING TAB → ONLY SELECTED TRADER
+    elif status == "negotiating":
+        base_query += """
+            AND LOWER(c.contract_status) = 'negotiating'
+            AND c.trader_user_id = %s
+        """
+        params.append(trader_id)
 
-    if tehsil:
-        query += " AND f.farm_tehsil=%s"
-        params.append(tehsil)
+    # ❌ TRADERS MUST NOT SEE THESE STATES
+    else:
+        return jsonify({"contracts": []}), 200
 
-    if block:
-        query += " AND f.farm_block=%s"
-        params.append(block)
+    base_query += " ORDER BY c.created_at DESC"
 
-    query += " ORDER BY c.created_at DESC"
-
-    cur.execute(query, params)
+    cur.execute(base_query, params)
     rows = cur.fetchall()
-    formatted = [format_available_contract(r) for r in rows]
-    return jsonify({"contracts": formatted}), 200
+
+    return jsonify({
+        "contracts": [format_available_contract(r) for r in rows]
+    }), 200
 
 
-# -----------------------------------------------------------------------
-# 2️⃣ TRADER SHOWS INTEREST IN A CONTRACT
-# -----------------------------------------------------------------------
+
 @trader_bp.route("/contracts/<string:contract_id>/interest", methods=["POST"])
 def show_interest(contract_id):
     trader_id = get_current_user_id()
@@ -220,7 +198,6 @@ def show_interest(contract_id):
     db = get_db()
     cur = db.cursor()
 
-    # Fetch existing negotiations
     cur.execute("SELECT negotiations FROM contracts WHERE contract_id=%s", (contract_id,))
     row = cur.fetchone()
 
@@ -229,7 +206,6 @@ def show_interest(contract_id):
 
     negotiations = json.loads(row["negotiations"] or "[]")
 
-    # Add interest
     negotiations.append({
         "trader_id": trader_id,
         "type": "interest",
@@ -237,7 +213,6 @@ def show_interest(contract_id):
         "timestamp": datetime.datetime.now().isoformat()
     })
 
-    # Save back to DB
     cur.execute("""
         UPDATE contracts 
         SET negotiations=%s
@@ -249,9 +224,7 @@ def show_interest(contract_id):
     return jsonify({"message": "Interest added successfully"}), 200
 
 
-# -----------------------------------------------------------------------
-# 3️⃣ FARMER ACCEPTS TRADER
-# -----------------------------------------------------------------------
+
 @trader_bp.route("/contracts/<string:contract_id>/accept-trader/<int:trader_id>", methods=["POST"])
 def accept_trader(contract_id, trader_id):
     db = get_db()
@@ -282,50 +255,49 @@ def accept_trader(contract_id, trader_id):
     return jsonify({"message": "Trader accepted"}), 200
 
 
-# ----------------------------------------------------------------------
-# 4️⃣ GET SINGLE CONTRACT DETAILS (FOR TRADER VIEW PAGE)
-# ----------------------------------------------------------------------
+
 @trader_bp.route("/contracts/<string:contract_id>", methods=["GET"])
 def get_single_contract(contract_id):
+    trader_id = get_current_user_id()
+    if not trader_id:
+        return jsonify({"message": "Unauthorized"}), 401
+
     db = get_db()
     cur = db.cursor()
 
-    query = """
+    cur.execute("""
         SELECT 
             c.*,
             f.farm_name, f.farm_id,
             f.farm_division, f.farm_district, f.farm_tehsil, f.farm_block,
-
             d.division_name,
             dist.district_name,
             t.tehsil_name,
             b.block_name,
-
             com.commodity_name,
             v.variety_name,
-
             u.full_name AS farmer_name
-
         FROM contracts c
         JOIN m_farm f ON f.farm_id = c.farm_id
         JOIN m_commodity com ON com.commodity_id = c.commodity_id
         JOIN m_commodity_variety v ON v.variety_id = c.variety_id
         JOIN m_user_login u ON u.user_id = c.user_id
-
         LEFT JOIN m_division d ON d.division_id = f.farm_division
         LEFT JOIN m_district dist ON dist.district_id = f.farm_district
         LEFT JOIN m_tehsil t ON t.tehsil_id = f.farm_tehsil
         LEFT JOIN m_block b ON b.block_id = f.farm_block
-
         WHERE c.contract_id = %s
         LIMIT 1
-    """
+    """, (contract_id,))
 
-    cur.execute(query, (contract_id,))
     row = cur.fetchone()
-
     if not row:
         return jsonify({"message": "Contract not found"}), 404
+
+    # 🔐 SECURITY CHECK
+    if row["contract_status"].lower() == "negotiating":
+        if row["trader_user_id"] != trader_id:
+            return jsonify({"message": "Forbidden"}), 403
 
     return jsonify({
         "contract": format_available_contract(row)

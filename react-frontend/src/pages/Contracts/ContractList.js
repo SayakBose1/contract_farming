@@ -14,21 +14,37 @@ import { contractsAPI } from "../../services/api";
 import { useAuth } from "../../contexts/AuthContext";
 import LoadingSpinner from "../../components/Common/LoadingSpinner";
 
+/* =========================
+   ROLE-BASED FILTERS
+========================= */
+const FARMER_FILTERS = [
+  "all",
+  "open",
+  "negotiating",
+  "accepted",
+  "active",
+  "completed",
+];
+
+const TRADER_FILTERS = ["open", "negotiating"];
+
 const ContractList = () => {
   const { user } = useAuth();
+  const location = useLocation();
+
+  const isFarmer = user?.user_type === "F" || user?.user_type === "FT";
+
   const [contracts, setContracts] = useState([]);
+  const [filter, setFilter] = useState(isFarmer ? "all" : "open");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
-  const location = useLocation();
   const [successMessage, setSuccessMessage] = useState(
     location.state?.message || ""
   );
 
-  const [filter, setFilter] = useState("all");
-
-  const isFarmer = user?.user_type === "F" || user?.user_type === "FT";
-
+  /* =========================
+     EFFECTS
+  ========================= */
   useEffect(() => {
     fetchContracts();
   }, [filter]);
@@ -40,9 +56,13 @@ const ContractList = () => {
     }
   }, [successMessage]);
 
+  /* =========================
+     API FETCH
+  ========================= */
   const fetchContracts = async () => {
     try {
       setLoading(true);
+      setError(null);
 
       const params = filter !== "all" ? { status: filter } : {};
 
@@ -59,10 +79,21 @@ const ContractList = () => {
     }
   };
 
+  /* =========================
+     HELPERS
+  ========================= */
+  const safeDate = (value) => {
+    if (!value) return "N/A";
+    const dt = new Date(value.replace(" ", "T"));
+    return isNaN(dt) ? "N/A" : dt.toLocaleDateString();
+  };
+
   const getStatusIcon = (status) => {
     switch (status) {
       case "open":
         return <FaClock className="text-blue-600" />;
+      case "negotiating":
+        return <FaClock className="text-yellow-600" />;
       case "accepted":
       case "active":
         return <FaCheckCircle className="text-green-600" />;
@@ -91,17 +122,9 @@ const ContractList = () => {
         return "bg-gray-100 text-gray-800";
       case "cancelled":
         return "bg-gray-200 text-gray-600";
-      case "disputed":
-        return "bg-red-100 text-red-800";
       default:
         return "bg-gray-100 text-gray-800";
     }
-  };
-
-  const safeDate = (d) => {
-    const value = d || "";
-    const dt = new Date(value.replace(" ", "T"));
-    return isNaN(dt) ? "N/A" : dt.toLocaleDateString();
   };
 
   if (loading) {
@@ -112,14 +135,23 @@ const ContractList = () => {
     );
   }
 
+  /* =========================
+     RENDER
+  ========================= */
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Header */}
+        {/* HEADER */}
         <div className="flex justify-between items-center mb-8">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">My Contracts</h1>
-            <p className="text-gray-600">Manage your farming contracts</p>
+            <h1 className="text-3xl font-bold text-gray-900">
+              {isFarmer ? "My Contracts" : "Available Contracts"}
+            </h1>
+            <p className="text-gray-600">
+              {isFarmer
+                ? "Manage your farming contracts"
+                : "Browse and negotiate contracts from farmers"}
+            </p>
           </div>
 
           {isFarmer && (
@@ -133,31 +165,23 @@ const ContractList = () => {
           )}
         </div>
 
-        {/* Success Message */}
+        {/* SUCCESS / ERROR */}
         {successMessage && (
           <div className="mb-6 p-4 bg-green-100 border border-green-400 text-green-700 rounded">
             {successMessage}
           </div>
         )}
 
-        {/* Error Message */}
         {error && (
           <div className="mb-6 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
             {error}
           </div>
         )}
 
-        {/* Filters */}
+        {/* FILTERS */}
         <div className="bg-white rounded-lg shadow-md p-4 mb-6">
           <div className="flex flex-wrap gap-2">
-            {[
-              "all",
-              "open",
-              "negotiating",
-              "accepted",
-              "active",
-              "completed",
-            ].map((status) => (
+            {(isFarmer ? FARMER_FILTERS : TRADER_FILTERS).map((status) => (
               <button
                 key={status}
                 onClick={() => setFilter(status)}
@@ -173,7 +197,7 @@ const ContractList = () => {
           </div>
         </div>
 
-        {/* Contract List */}
+        {/* EMPTY STATE */}
         {contracts.length === 0 ? (
           <div className="bg-white rounded-lg shadow-md p-6">
             <div className="text-center py-12">
@@ -183,17 +207,19 @@ const ContractList = () => {
               </h3>
 
               <p className="text-gray-600 mb-6">
-                {filter === "all"
-                  ? isFarmer
+                {isFarmer
+                  ? filter === "all"
                     ? "Create your first contract to start connecting with buyers."
-                    : "No contracts found."
-                  : `No contracts with status "${filter}".`}
+                    : `No contracts with status "${filter}".`
+                  : filter === "open"
+                  ? "No open contracts available right now."
+                  : "You are not negotiating any contracts yet."}
               </p>
 
               {isFarmer && (
                 <Link
                   to="/contracts/create"
-                  className="btn-primary inline-flex items-center"
+                  className="inline-flex items-center bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md"
                 >
                   <FaPlus className="mr-2 h-4 w-4" />
                   Create Your First Contract
@@ -202,18 +228,17 @@ const ContractList = () => {
             </div>
           </div>
         ) : (
+          /* CONTRACT LIST */
           <div className="grid grid-cols-1 gap-6">
             {contracts.map((contract) => (
               <Link
-                key={contract.contractId || contract.contract_id || contract.id}
-                to={`/contracts/${
-                  contract.contractId || contract.contract_id || contract.id
-                }`}
+                key={contract.contractId}
+                to={`/contracts/${contract.contractId}`}
                 className="bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow overflow-hidden"
               >
                 <div className="p-6">
                   <div className="flex justify-between items-start mb-4">
-                    <div className="flex-1">
+                    <div>
                       <div className="flex items-center gap-3 mb-2">
                         <h3 className="text-xl font-semibold text-gray-900">
                           {contract.contractId}
@@ -230,95 +255,45 @@ const ContractList = () => {
                       <div className="flex items-center text-gray-600 text-sm">
                         {getStatusIcon(contract.contractStatus)}
                         <span className="ml-2">
-                          Created:{" "}
-                          {safeDate(contract.createdAt || contract.created_at)}
+                          Created: {safeDate(contract.createdAt)}
                         </span>
                       </div>
                     </div>
-
                     <FaEye className="h-5 w-5 text-gray-400" />
                   </div>
 
-                  {/* Contract Details */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {/* Commodity */}
                     <div>
                       <p className="text-sm text-gray-600">Commodity</p>
                       <p className="font-medium text-gray-900">
-                        {contract.commodity?.commodity_name || "N/A"}
+                        {contract.commodity?.commodity_name}
                       </p>
-
-                      {contract.variety?.variety_name && (
-                        <p className="text-sm text-gray-500">
-                          {contract.variety.variety_name}
-                        </p>
-                      )}
+                      <p className="text-sm text-gray-500">
+                        {contract.variety?.variety_name}
+                      </p>
                     </div>
 
-                    {/* Quantity */}
                     <div>
                       <p className="text-sm text-gray-600">Quantity</p>
                       <p className="font-medium text-gray-900">
-                        {contract.cropDetails?.quantity?.amount ||
-                          contract.crop_quantity_amount}{" "}
-                        {contract.cropDetails?.quantity?.unit ||
-                          contract.crop_quantity_unit}
+                        {contract.cropDetails?.quantity?.amount}{" "}
+                        {contract.cropDetails?.quantity?.unit}
                       </p>
                       <p className="text-sm text-gray-500 capitalize">
-                        {contract.cropDetails?.quality ||
-                          contract.commodity_quality}{" "}
-                        grade
+                        {contract.cropDetails?.quality} grade
                       </p>
                     </div>
 
-                    {/* Price */}
                     <div>
                       <p className="text-sm text-gray-600">Base Price</p>
                       <p className="font-medium text-gray-900">
-                        ₹{contract.pricing?.basePrice || contract.base_price}{" "}
+                        ₹{contract.pricing?.basePrice}{" "}
                         <span className="text-sm text-gray-500">
-                          {contract.pricing?.priceUnit || contract.price_unit}
+                          {contract.pricing?.priceUnit}
                         </span>
                       </p>
-
-                      {(contract.pricing?.totalEstimatedValue ||
-                        contract.total_estimated_value) && (
-                        <p className="text-sm text-gray-500">
-                          Total: ₹
-                          {contract.pricing?.totalEstimatedValue ||
-                            contract.total_estimated_value}
-                        </p>
-                      )}
                     </div>
                   </div>
-
-                  {/* Dates */}
-                  {(contract.farmingDetails?.plantingDate ||
-                    contract.planting_date) && (
-                    <div className="mt-4 pt-4 border-t border-gray-200">
-                      <div className="flex gap-6 text-sm">
-                        <div>
-                          <span className="text-gray-600">Planting: </span>
-                          <span className="font-medium text-gray-900">
-                            {new Date(
-                              contract.farmingDetails?.plantingDate ||
-                                contract.planting_date
-                            ).toLocaleDateString()}
-                          </span>
-                        </div>
-
-                        <div>
-                          <span className="text-gray-600">Harvest: </span>
-                          <span className="font-medium text-gray-900">
-                            {new Date(
-                              contract.farmingDetails?.harvestingDate ||
-                                contract.harvesting_date
-                            ).toLocaleDateString()}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
 
                 <div className="px-6 py-3 bg-gray-50 border-t border-gray-200">

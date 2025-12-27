@@ -1,8 +1,10 @@
 from flask import Flask
 from flask_cors import CORS
 import init
+from dotenv import load_dotenv
 
 init.init()
+load_dotenv()
 
 from routes.test_routes import test_bp
 from routes.auth_routes import auth_bp

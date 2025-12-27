@@ -450,7 +450,7 @@ const AvailableContracts = () => {
                             contract.contract_id || contract.contractId
                           );
                         }}
-                        className="btn-primary inline-flex items-center"
+                        className="inline-flex items-center bg-sky-500 hover:bg-sky-600 text-white px-4 py-2 rounded-md shadow-sm transition"
                       >
                         <FaHandshake className="mr-2" />
                         Show Interest

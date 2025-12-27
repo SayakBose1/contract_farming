@@ -11,9 +11,7 @@ auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 SECRET_KEY = os.environ.get('SECRET_KEY', 'your-secret-key-change-this')
 
 
-# ------------------------------
-# DATABASE CONNECTION
-# ------------------------------
+
 def get_db_connection():
     return pymysql.connect(
         host=os.environ.get('DB_HOST', 'localhost'),
@@ -26,9 +24,7 @@ def get_db_connection():
     )
 
 
-# ------------------------------
-# TOKEN CHECK DECORATOR
-# ------------------------------
+
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -69,9 +65,7 @@ def token_required(f):
     return decorated
 
 
-# ------------------------------
-# LOGIN
-# ------------------------------
+
 @auth_bp.route('/login', methods=['POST'])
 def login():
     data = request.get_json() or {}
@@ -85,7 +79,6 @@ def login():
         conn = get_db_connection()
         with conn.cursor() as cur:
 
-            # m_user_login does NOT contain email_id
             cur.execute("""
                 SELECT user_id, mobile_number, pass_key, full_name, user_type
                 FROM m_user_login 
@@ -103,7 +96,6 @@ def login():
                 conn.close()
                 return jsonify({'message': 'Invalid credentials'}), 401
 
-            # get email from m_user
             cur.execute("""
                 SELECT email_id FROM m_user WHERE user_id=%s LIMIT 1
             """, (user["user_id"],))
@@ -133,9 +125,7 @@ def login():
         return jsonify({'message': f'Login failed: {str(e)}'}), 500
 
 
-# ------------------------------
-# SIGNUP STEP 1
-# ------------------------------
+
 @auth_bp.route('/signup', methods=['POST'])
 def signup_step1():
     data = request.get_json() or {}
@@ -175,9 +165,7 @@ def signup_step1():
         return jsonify({'message': f'Signup step1 failed: {str(e)}'}), 500
 
 
-# ------------------------------
-# SIGNUP STEP 2
-# ------------------------------
+
 @auth_bp.route('/signup/details/<int:user_id>', methods=['POST'])
 def signup_step2(user_id):
     data = request.get_json() or {}
@@ -192,7 +180,6 @@ def signup_step2(user_id):
             if not login_user:
                 return jsonify({'message': 'Step1 not completed'}), 404
 
-            # Prepare fields
             reg_id = data.get("reg_id", f"{login_user['user_type']}{user_id:05d}")
 
             cur.execute("""
@@ -236,9 +223,7 @@ def signup_step2(user_id):
         return jsonify({'message': f'Signup step2 failed: {str(e)}'}), 500
 
 
-# ------------------------------
-# PROFILE & PASSWORD
-# ------------------------------
+
 @auth_bp.route('/me', methods=['GET'])
 @token_required
 def get_current_user(current_user):
@@ -250,14 +235,12 @@ def get_current_user(current_user):
         conn = get_db_connection()
         with conn.cursor() as cur:
 
-            # Get basic login data
             cur.execute("""
                 SELECT user_id, full_name, mobile_number, user_type
                 FROM m_user_login WHERE user_id=%s
             """, (user_id,))
             login = cur.fetchone()
 
-            # Get additional profile data
             cur.execute("""
                 SELECT email_id, address, status as is_active
                 FROM m_user WHERE user_id=%s LIMIT 1
@@ -305,13 +288,11 @@ def update_profile(current_user):
         conn = get_db_connection()
         with conn.cursor() as cur:
 
-            # Update m_user_login full_name
             cur.execute("""
                 UPDATE m_user_login SET full_name=%s, updated_time=NOW()
                 WHERE user_id=%s
             """, (full_name, user_id))
 
-            # Update m_user table (email + address)
             cur.execute("""
                 UPDATE m_user 
                 SET email_id=%s, address=%s, updated_date=NOW()
@@ -321,7 +302,6 @@ def update_profile(current_user):
         conn.commit()
         conn.close()
 
-        # Return updated user
         return jsonify({
             "message": "Profile updated successfully",
             "user": {
@@ -339,9 +319,8 @@ def update_profile(current_user):
         current_app.logger.exception("Profile update error")
         return jsonify({"message": f"Profile update failed: {str(e)}"}), 500
 
-# ------------------------------
-# LOGOUT (Simple)
-# ------------------------------
+
+
 @auth_bp.route('/logout', methods=['POST'])
 @token_required
 def logout(current_user):

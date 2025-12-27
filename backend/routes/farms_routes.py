@@ -7,7 +7,6 @@ from datetime import datetime
 
 farms_bp = Blueprint("farms", __name__, url_prefix="/farms")
 
-# Use the same secret as auth_routes.py
 SECRET_KEY = os.environ.get('SECRET_KEY', 'your-secret-key-change-this')
 
 
@@ -22,9 +21,7 @@ def get_db():
     )
 
 
-# --------------------------
-# REAL CURRENT USER (from JWT)
-# --------------------------
+
 def get_current_user_id():
     """
     Extract user_id from JWT token (same logic as auth.token_required)
@@ -32,7 +29,6 @@ def get_current_user_id():
     auth_header = request.headers.get("Authorization", "")
 
     if not auth_header:
-        # No token sent
         return None
 
     token = auth_header
@@ -65,9 +61,7 @@ def get_current_user_id():
         return None
 
 
-# --------------------------
-# SAFE HELPERS
-# --------------------------
+
 def to_float(value):
     if value in ("", None):
         return None
@@ -87,9 +81,7 @@ def safe_json(value):
         return []
 
 
-# -------------------------------------------------------------
-# GET /farms → List of farms
-# -------------------------------------------------------------
+
 @farms_bp.route("", methods=["GET"])
 def list_farms():
     try:
@@ -149,13 +141,10 @@ def list_farms():
         return jsonify({"message": str(e)}), 500
 
 
-# -------------------------------------------------------------
-# GET /farms/<id> → Full farm details
-# -------------------------------------------------------------
+
 @farms_bp.route("/<int:farm_id>", methods=["GET"])
 def get_farm(farm_id):
     try:
-        # (Optional) you could also check owner via get_current_user_id() here
         conn = get_db()
         with conn.cursor() as cur:
             sql = """
@@ -180,7 +169,6 @@ def get_farm(farm_id):
         if not row:
             return jsonify({"message": "Farm not found"}), 404
 
-        # PARSE JSON fields
         for field in [
             "farming_techniques",
             "certifications",
@@ -194,7 +182,6 @@ def get_farm(farm_id):
             else:
                 row[field] = []
 
-        # Convert booleans
         boolean_fields = [
             "facilities_processing_facility",
             "facilities_cold_storage",
@@ -204,7 +191,6 @@ def get_farm(farm_id):
         for field in boolean_fields:
             row[field] = bool(row[field])
 
-        # Attach related objects
         row["district"] = {
             "district_id": row["district_id"],
             "district_name": row["district_name"]
@@ -231,9 +217,7 @@ def get_farm(farm_id):
         return jsonify({"message": str(e)}), 500
 
 
-# -------------------------------------------------------------
-# POST /farms → Create a new farm
-# -------------------------------------------------------------
+
 @farms_bp.route("", methods=["POST"])
 def create_farm():
     data = request.get_json()
@@ -245,13 +229,11 @@ def create_farm():
 
         now = datetime.now()
 
-        # Extract sub-groups
         soil = data.get("soilInformation", {})
         farm_size = data.get("farmSize", {})
         coords = (data.get("location") or {}).get("coordinates") or {}
         facilities = data.get("facilities") or {}
 
-        # Floats
         lat = to_float(coords.get("latitude"))
         lon = to_float(coords.get("longitude"))
         soil_ph = to_float(soil.get("phLevel"))
@@ -261,12 +243,10 @@ def create_farm():
         soil_k = to_float(soil.get("potassium"))
         size_area = to_float(farm_size.get("area"))
 
-        # Strings
         size_unit = farm_size.get("unit") or None
         facilities_capacity = to_float(facilities.get("storageCapacity"))
         facilities_type = facilities.get("storageType") or None
 
-        # Booleans → int
         proc_fac = 1 if facilities.get("processingFacility") else 0
         cold_store = 1 if facilities.get("coldStorage") else 0
         pack_fac = 1 if facilities.get("packingFacility") else 0
@@ -274,7 +254,6 @@ def create_farm():
 
         soil_test_date = soil.get("soilTestDate") or None
 
-        # JSON fields
         farming_techniques = json.dumps(data.get("farmingTechniques") or [])
         certifications = json.dumps(data.get("certifications") or [])
         current_crops = json.dumps(data.get("currentCrops") or [])
@@ -282,7 +261,6 @@ def create_farm():
         media_images = json.dumps(data.get("farmImages") or [])
         media_videos = json.dumps(data.get("farmVideos") or [])
 
-        # Insert
         sql = """
             INSERT INTO m_farm (
                 user_id, farm_name, farm_division, farm_district, farm_tehsil, farm_block,
@@ -359,9 +337,7 @@ def create_farm():
         return jsonify({"message": str(e)}), 500
 
 
-# -------------------------------------------------------------
-# DELETE /farms/<id>
-# -------------------------------------------------------------
+
 @farms_bp.route("/<int:farm_id>", methods=["DELETE"])
 def delete_farm(farm_id):
     try:
@@ -371,7 +347,6 @@ def delete_farm(farm_id):
 
         conn = get_db()
         with conn.cursor() as cur:
-            # Optional: ensure the farm belongs to current user
             cur.execute(
                 "DELETE FROM m_farm WHERE farm_id = %s AND user_id = %s",
                 (farm_id, user_id)

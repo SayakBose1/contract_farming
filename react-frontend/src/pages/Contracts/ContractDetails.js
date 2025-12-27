@@ -29,8 +29,18 @@ const ContractDetails = () => {
   const [error, setError] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [acceptingTrader, setAcceptingTrader] = useState(null);
+  const [images, setImages] = useState([]);
+  const [imageRequest, setImageRequest] = useState(null);
+  const [requestMessage, setRequestMessage] = useState("");
+  const [showRequestBox, setShowRequestBox] = useState(false);
+  const [negotiationImages, setNegotiationImages] = useState([]);
+  const [uploadingImages, setUploadingImages] = useState(false);
+  const [selectedImage, setSelectedImage] = useState(null);
 
   const isFarmer = user?.user_type === "F" || user?.user_type === "FT";
+  const isTrader = !isFarmer;
+  const isNegotiating =
+    (contract?.contract_status || contract?.contractStatus) === "negotiating";
 
   useEffect(() => {
     fetchContractDetails();
@@ -39,11 +49,20 @@ const ContractDetails = () => {
   const fetchContractDetails = async () => {
     try {
       setLoading(true);
-      const response = await contractsAPI.getContract(id);
-        console.log("TRADER CONTRACT RAW:", response.data.contract);
-      setContract(response.data.contract);
+
+      const [contractRes, imagesRes, requestRes] = await Promise.all([
+        contractsAPI.getContract(id),
+        contractsAPI.getContractImages(id),
+        contractsAPI.getImageRequest(id),
+      ]);
+
+      setContract(contractRes.data.contract);
+      setImages(imagesRes.data.images || []);
+      setImageRequest(requestRes.data.request);
+
+      setContract(contractRes.data.contract);
+      setImages(imagesRes.data.images || []);
     } catch (err) {
-      console.error("Error fetching contract details:", err);
       setError("Failed to load contract details");
     } finally {
       setLoading(false);
@@ -81,9 +100,9 @@ const ContractDetails = () => {
     return negotiations
       .filter((n) => n.type === "interest" && n.status === "pending")
       .map((n) => ({
-        userId: n.trader_id, // FIXED
-        userName: n.user_name || "Trader", // Optional, backend does not send name yet
-        userMobile: n.user_mobile || "", // Optional
+        userId: n.trader_id,
+        userName: n.trader_name || "Trader",
+        userMobile: n.trader_mobile || "N/A",
         timestamp: n.timestamp,
       }));
   };
@@ -161,7 +180,6 @@ const ContractDetails = () => {
     );
   }
 
-  // normalize contract data
   const contractData = contract.cropDetails
     ? contract
     : {
@@ -223,7 +241,6 @@ const ContractDetails = () => {
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* HEADER */}
         <div className="mb-6">
           <Link
             to="/contracts"
@@ -279,7 +296,6 @@ const ContractDetails = () => {
           </div>
         </div>
 
-        {/* Delete Confirmation Modal */}
         {deleteConfirm && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-lg p-6 max-w-md">
@@ -306,9 +322,7 @@ const ContractDetails = () => {
           </div>
         )}
 
-        {/* MAIN CONTENT GRID */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* MAIN LEFT SECTION */}
           <div className="lg:col-span-2 space-y-6">
             {/* CROP DETAILS */}
             <div className="bg-white rounded-lg shadow-md p-6">
@@ -357,6 +371,86 @@ const ContractDetails = () => {
                 )}
               </div>
             </div>
+
+            {/* CROP IMAGES */}
+            {images.length > 0 && (
+              <div className="bg-white rounded-lg shadow-md p-6 mt-6">
+                <h2 className="text-xl font-semibold text-gray-900 mb-4">
+                  Crop Images
+                </h2>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {images.map((img) => (
+                    <div
+                      key={img.image_id}
+                      className="border rounded-lg overflow-hidden"
+                    >
+                      <img
+                        src={img.image_url}
+                        alt="Contract"
+                        onClick={() => setSelectedImage(img.image_url)}
+                        className="w-full h-32 object-cover
+             transition-transform duration-300 ease-in-out
+             hover:scale-110 cursor-pointer"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* FARMER – IMAGE REQUEST RECEIVED */}
+            {isFarmer &&
+              isNegotiating &&
+              imageRequest?.status === "pending" && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 mt-6">
+                  <h2 className="text-lg font-semibold text-yellow-800 mb-2">
+                    Trader Requested More Images
+                  </h2>
+
+                  <p className="text-sm text-yellow-700 mb-4">
+                    {imageRequest.message}
+                  </p>
+
+                  <input
+                    type="file"
+                    multiple
+                    accept="image/*"
+                    onChange={(e) =>
+                      setNegotiationImages(Array.from(e.target.files))
+                    }
+                    className="block w-full text-sm mb-3"
+                  />
+
+                  <button
+                    onClick={async () => {
+                      if (negotiationImages.length === 0) return;
+
+                      try {
+                        setUploadingImages(true);
+
+                        const fd = new FormData();
+                        negotiationImages.forEach((img) =>
+                          fd.append("images", img)
+                        );
+                        fd.append("upload_stage", "negotiation");
+
+                        await contractsAPI.uploadContractImages(id, fd);
+                        await contractsAPI.fulfillImageRequest(id);
+                        fetchContractDetails();
+                      } catch (err) {
+                        alert("Failed to upload images");
+                      } finally {
+                        setUploadingImages(false);
+                      }
+                    }}
+                    disabled={uploadingImages}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300"
+                  >
+                    {uploadingImages ? "Uploading..." : "Upload Images"}
+                  </button>
+                </div>
+              )}
 
             {/* FARMING DETAILS */}
             <div className="bg-white rounded-lg shadow-md p-6">
@@ -592,7 +686,6 @@ const ContractDetails = () => {
             </div>
           </div>
 
-          {/* SIDEBAR */}
           <div className="space-y-6">
             {/* FARM INFO */}
             {contractData.farm && (
@@ -718,6 +811,58 @@ const ContractDetails = () => {
               </div>
             </div>
 
+            {/* TRADER – REQUEST MORE IMAGES */}
+            {isTrader &&
+              isNegotiating &&
+              (!imageRequest || imageRequest.status === "fulfilled") && (
+                <div className="bg-white rounded-lg shadow-md p-6">
+                  <h2 className="text-lg font-semibold text-gray-900 mb-3">
+                    Negotiation Action
+                  </h2>
+
+                  {!showRequestBox ? (
+                    <button
+                      onClick={() => setShowRequestBox(true)}
+                      className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                    >
+                      Request More Images
+                    </button>
+                  ) : (
+                    <div className="space-y-3">
+                      <textarea
+                        value={requestMessage}
+                        onChange={(e) => setRequestMessage(e.target.value)}
+                        placeholder="Message to farmer (optional)"
+                        className="w-full border rounded-lg p-2 text-sm"
+                        rows={3}
+                      />
+
+                      <button
+                        onClick={async () => {
+                          try {
+                            await contractsAPI.requestMoreImages(id, {
+                              message: requestMessage,
+                            });
+
+                            setShowRequestBox(false);
+                            setRequestMessage("");
+                            fetchContractDetails();
+                          } catch (err) {
+                            alert(
+                              err.response?.data?.message ||
+                                "Failed to send request"
+                            );
+                          }
+                        }}
+                        className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg"
+                      >
+                        Send Request
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
             {/* QUICK ACTIONS */}
             <div className="bg-white rounded-lg shadow-md p-6">
               <h2 className="text-xl font-semibold text-gray-900 mb-4">
@@ -766,6 +911,19 @@ const ContractDetails = () => {
           </div>
         </div>
       </div>
+      {selectedImage && (
+        <div
+          className="fixed inset-0 z-50 bg-black bg-opacity-80
+               flex items-center justify-center"
+          onClick={() => setSelectedImage(null)}
+        >
+          <img
+            src={selectedImage}
+            alt="Full View"
+            className="max-w-[90%] max-h-[90%] rounded-lg shadow-lg"
+          />
+        </div>
+      )}
     </div>
   );
 };

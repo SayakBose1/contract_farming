@@ -123,6 +123,11 @@ export const contractsAPI = {
   getContract: (id) => api.get(`/contracts/${id}`),
   getFormData: () => api.get("/contracts/form-data"),
   createContract: (data) => api.post("/contracts", data),
+  uploadContractImages: (contractId, formData) =>
+    api.post(`/contracts/${contractId}/images`, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    }),
+  getContractImages: (contractId) => api.get(`/contracts/${contractId}/images`),
   updateContract: (id, data) => api.put(`/contracts/${id}`, data),
   acceptContract: (id) => api.post(`/contracts/${id}/accept`),
   negotiateContract: (id, data) => api.post(`/contracts/${id}/negotiate`, data),
@@ -132,6 +137,12 @@ export const contractsAPI = {
   showInterest: (id) => api.post(`/trader/contracts/${id}/interest`),
   acceptTrader: (id, traderId) =>
     api.post(`/trader/contracts/${id}/accept-trader/${traderId}`),
+  requestMoreImages: (contractId, data) =>
+    api.post(`/contracts/${contractId}/image-request`, data),
+  getImageRequest: (contractId) =>
+    api.get(`/contracts/${contractId}/image-request`),
+  fulfillImageRequest: (contractId) =>
+    api.post(`/contracts/${contractId}/image-request/fulfill`),
 };
 
 // ---------------------------------------------------------
